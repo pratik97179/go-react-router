@@ -60,7 +60,7 @@ temp/
 
 # Generated binaries
 
-server
+cmd/server/server
 
 # Air (live reload)
 
