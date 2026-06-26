@@ -1,13 +1,18 @@
 package main
 
 import (
-	"fmt"
-	"github.com/gin-gonic/gin"
+	"go-react-router/internal/app"
+	"log"
 )
 
 func main() {
-	r := gin.Default()
+	application, err := app.New()
 
-	fmt.Println("Starting server at 8000...")
-	r.Run(":8000")
+	if err != nil {
+		log.Fatal("failed to initialise application: %v", err)
+	}
+
+	if err := application.Run(); err != nil {
+		log.Fatal("failed to start the server: %v", err)
+	}
 }
