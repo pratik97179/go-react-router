@@ -1,13 +1,21 @@
 package database
 
-import "github.com/supabase-community/supabase-go"
+import (
+	"context"
 
-func New(URL string, Key string) (*supabase.Client, error) {
-	db, err := supabase.NewClient(URL, Key, nil)
+	"github.com/jackc/pgx/v5/pgxpool"
+)
 
+func New(connectionString string) (*pgxpool.Pool, error) {
+	pool, err := pgxpool.New(context.Background(), connectionString)
 	if err != nil {
 		return nil, err
 	}
 
-	return db, nil
+	if err := pool.Ping(context.Background()); err != nil {
+		pool.Close()
+		return nil, err
+	}
+
+	return pool, nil
 }

@@ -19,8 +19,7 @@ type ServerConfig struct {
 }
 
 type DatabaseConfig struct {
-	URL string
-	Key string
+	ConnectionString string
 }
 
 type JWTConfig struct {
@@ -36,12 +35,7 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
-	databaseURL, err := getRequiredEnv("DATABASE_URL")
-	if err != nil {
-		return nil, err
-	}
-
-	databaseKey, err := getRequiredEnv("DATABASE_KEY")
+	connectionString, err := getRequiredEnv("DATABASE_CONNECTION_STRING")
 	if err != nil {
 		return nil, err
 	}
@@ -66,8 +60,7 @@ func Load() (*Config, error) {
 			Port: port,
 		},
 		Database: DatabaseConfig{
-			URL: databaseURL,
-			Key: databaseKey,
+			ConnectionString: connectionString,
 		},
 		JWT: JWTConfig{
 			Secret: jwtSecret,

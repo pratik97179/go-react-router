@@ -2,10 +2,10 @@ package app
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/supabase-community/supabase-go"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func NewRouter(db *supabase.Client) (*gin.Engine, error) {
+func NewRouter(db *pgxpool.Pool) (*gin.Engine, error) {
 	router := gin.New()
 
 	router.Use(
