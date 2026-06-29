@@ -1,11 +1,17 @@
 package app
 
 import (
+	"go-react-router/internal/api/routes"
+
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func NewRouter(db *pgxpool.Pool) (*gin.Engine, error) {
+// NewRouter creates and configures the application's HTTP router.
+func NewRouter(
+	db *pgxpool.Pool,
+) *gin.Engine {
+
 	router := gin.New()
 
 	router.Use(
@@ -13,5 +19,12 @@ func NewRouter(db *pgxpool.Pool) (*gin.Engine, error) {
 		gin.Recovery(),
 	)
 
-	return router, nil
+	api := router.Group("/api/v1")
+
+	routes.RegisterUserRoutes(
+		api,
+		db,
+	)
+
+	return router
 }

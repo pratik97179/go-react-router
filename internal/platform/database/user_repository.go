@@ -2,14 +2,154 @@ package database
 
 import (
 	"context"
+	"errors"
+	"strings"
+	"time"
+
 	"go-react-router/internal/domain/user"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// UserRepository implements user.Repository using PostgreSQL.
 type UserRepository struct {
-
+	db *pgxpool.Pool
 }
 
-func (u *UserRepository) Create(ctx context.Context, user user.User) {
+// userRecord represents the persisted form of a User.
+type userRecord struct {
+	ID           string    `db:"id"`
+	Email        string    `db:"email"`
+	PasswordHash string    `db:"password_hash"`
+	FullName     string    `db:"full_name"`
+	CreatedAt    time.Time `db:"created_at"`
+	UpdatedAt    time.Time `db:"updated_at"`
+}
 
-	
+// NewUserRepository creates a new UserRepository.
+func NewUserRepository(db *pgxpool.Pool) *UserRepository {
+	return &UserRepository{
+		db: db,
+	}
+}
+
+func toRecord(u user.User) userRecord {
+	return userRecord{
+		ID:           u.ID,
+		Email:        u.Email,
+		PasswordHash: u.PasswordHash,
+		FullName:     u.FullName,
+		CreatedAt:    u.CreatedAt,
+		UpdatedAt:    u.UpdatedAt,
+	}
+}
+
+func toDomain(r userRecord) user.User {
+	return user.User{
+		ID:           r.ID,
+		Email:        r.Email,
+		PasswordHash: r.PasswordHash,
+		FullName:     r.FullName,
+		CreatedAt:    r.CreatedAt,
+		UpdatedAt:    r.UpdatedAt,
+	}
+}
+
+// Create persists a new user.
+func (r *UserRepository) Create(
+	ctx context.Context,
+	u user.User,
+) error {
+
+	record := toRecord(u)
+
+	err := r.db.QueryRow(
+		ctx,
+		`
+		INSERT INTO users (
+			email,
+			password_hash,
+			full_name
+		)
+		VALUES ($1, $2, $3)
+		RETURNING
+			id,
+			email,
+			password_hash,
+			full_name,
+			created_at,
+			updated_at
+		`,
+		record.Email,
+		record.PasswordHash,
+		record.FullName,
+	).Scan(
+		&record.ID,
+		&record.Email,
+		&record.PasswordHash,
+		&record.FullName,
+		&record.CreatedAt,
+		&record.UpdatedAt,
+	)
+
+	if err != nil {
+		var pgErr *pgconn.PgError
+
+		if errors.As(err, &pgErr) &&
+			pgErr.Code == "23505" &&
+			strings.Contains(pgErr.ConstraintName, "email") {
+
+			return user.ErrEmailAlreadyExists
+		}
+
+		return err
+	}
+
+	return nil
+}
+
+// FindByEmail returns a user by email.
+func (r *UserRepository) FindByEmail(
+	ctx context.Context,
+	email string,
+) (*user.User, error) {
+
+	var record userRecord
+
+	err := r.db.QueryRow(
+		ctx,
+		`
+		SELECT
+			id,
+			email,
+			password_hash,
+			full_name,
+			created_at,
+			updated_at
+		FROM users
+		WHERE email = $1
+		`,
+		email,
+	).Scan(
+		&record.ID,
+		&record.Email,
+		&record.PasswordHash,
+		&record.FullName,
+		&record.CreatedAt,
+		&record.UpdatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, user.ErrUserNotFound
+		}
+
+		return nil, err
+	}
+
+	domainUser := toDomain(record)
+
+	return &domainUser, nil
 }

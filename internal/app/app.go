@@ -57,10 +57,7 @@ func (a *Application) initializeDatabase() error {
 }
 
 func (a *Application) initializeRouter() error {
-	router, err := NewRouter(a.db)
-	if err != nil {
-		return err
-	}
+	router := NewRouter(a.db)
 
 	a.router = router
 	return nil
