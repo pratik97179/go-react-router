@@ -5,13 +5,13 @@ import (
 	"go-react-router/internal/platform/database"
 
 	"github.com/gin-gonic/gin"
-	"github.com/supabase-community/supabase-go"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Application struct {
 	router *gin.Engine
 	config  *config.Config
-	db     *supabase.Client
+	db     *pgxpool.Pool
 }
 
 func New() (*Application, error) {
@@ -47,7 +47,7 @@ func (a *Application) initializeConfig() error {
 }
 
 func (a *Application) initializeDatabase() error {
-	db, err := database.New(a.config.Database.URL, a.config.Database.Key)
+	db, err := database.New(a.config.Database.ConnectionString)
 	if err != nil {
 		return err
 	}
@@ -57,10 +57,7 @@ func (a *Application) initializeDatabase() error {
 }
 
 func (a *Application) initializeRouter() error {
-	router, err := NewRouter(a.db)
-	if err != nil {
-		return err
-	}
+	router := NewRouter(a.db)
 
 	a.router = router
 	return nil
