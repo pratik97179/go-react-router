@@ -37,8 +37,6 @@ func Load() (*Config, error) {
 
 	connectionString, err := getRequiredEnv("DATABASE_CONNECTION_STRING")
 
-	fmt.Println("DATABASE_CONNECTION_STRING =", os.Getenv("DATABASE_CONNECTION_STRING"))
-	
 	if err != nil {
 		return nil, err
 	}
