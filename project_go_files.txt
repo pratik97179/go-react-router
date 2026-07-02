@@ -1,0 +1,791 @@
+./cmd/server/main.go
+--------------------
+package main
+
+import (
+	"go-react-router/internal/app"
+	"log"
+)
+
+func main() {
+	application, err := app.New()
+
+	if err != nil {
+		log.Fatalf("failed to initialise application: %v", err)
+	}
+
+	if err := application.Run(); err != nil {
+		log.Fatalf("failed to start the server: %v", err)
+	}
+}
+
+
+./internal/api/handler/user_handler.go
+--------------------------------------
+package handler
+
+import (
+	"errors"
+	"net/http"
+
+	"go-react-router/internal/api/response"
+	"go-react-router/internal/application/identity/command"
+	"go-react-router/internal/domain/identity"
+	"go-react-router/internal/domain/identity/aggregate"
+
+	"github.com/gin-gonic/gin"
+)
+
+// UserHandler handles identity-related HTTP requests.
+type UserHandler struct {
+	registerUser *command.RegisterUserCommandHandler
+}
+
+// NewUserHandler creates a new UserHandler.
+func NewUserHandler(
+	registerUser *command.RegisterUserCommandHandler,
+) *UserHandler {
+	return &UserHandler{
+		registerUser: registerUser,
+	}
+}
+
+// Register handles identity registration.
+func (h *UserHandler) Register(
+	c *gin.Context,
+) {
+	var registration aggregate.Registration
+
+	if err := c.ShouldBindJSON(&registration); err != nil {
+		response.JSON(
+			c,
+			http.StatusBadRequest,
+			false,
+			err.Error(),
+			nil,
+		)
+		return
+	}
+
+	err := h.registerUser.Execute(
+		c.Request.Context(),
+		registration,
+	)
+
+	if err != nil {
+
+		switch {
+
+		case errors.Is(err, identity.ErrEmailAlreadyExists):
+			response.JSON(
+				c,
+				http.StatusConflict,
+				false,
+				err.Error(),
+				nil,
+			)
+
+		case errors.Is(err, identity.ErrEmailRequired),
+			errors.Is(err, identity.ErrInvalidEmail),
+			errors.Is(err, identity.ErrPasswordRequired),
+			errors.Is(err, identity.ErrFullNameRequired):
+
+			response.JSON(
+				c,
+				http.StatusBadRequest,
+				false,
+				err.Error(),
+				nil,
+			)
+
+		default:
+			response.JSON(
+				c,
+				http.StatusInternalServerError,
+				false,
+				"Internal server error",
+				nil,
+			)
+		}
+
+		return
+	}
+
+	response.JSON(
+		c,
+		http.StatusOK,
+		true,
+		"Registration successful",
+		nil,
+	)
+}
+
+
+./internal/api/response/response.go
+-----------------------------------
+package response
+
+import "github.com/gin-gonic/gin"
+
+type Response struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    any    `json:"data"`
+}
+
+func JSON(
+	c *gin.Context,
+	status int,
+	success bool,
+	message string,
+	data any,
+) {
+	c.JSON(
+		status,
+		Response{
+			Success: success,
+			Message: message,
+			Data:    data,
+		},
+	)
+}
+
+
+./internal/api/routes/user_routes.go
+------------------------------------
+package routes
+
+import (
+	"go-react-router/internal/api/handler"
+	"go-react-router/internal/application/identity/command"
+	"go-react-router/internal/infrastructure/database"
+	"go-react-router/internal/infrastructure/security"
+
+	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// RegisterUserRoutes registers all user related routes.
+func RegisterUserRoutes(
+	router *gin.RouterGroup,
+	db *pgxpool.Pool,
+) {
+	userRepository := database.NewUserRepository(db)
+
+	passwordHasher := security.NewBcryptPasswordHasher()
+
+	registerUserCommandHandler := command.NewRegisterUserCommandHandler(
+		userRepository,
+		passwordHasher,
+	)
+
+	userHandler := handler.NewUserHandler(
+		registerUserCommandHandler,
+	)
+
+	users := router.Group("/users")
+	{
+		users.POST(
+			"/register",
+			userHandler.Register,
+		)
+	}
+}
+
+
+./internal/app/app.go
+---------------------
+package app
+
+import (
+	"go-react-router/internal/config"
+	"go-react-router/internal/infrastructure/database"
+
+	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type Application struct {
+	router *gin.Engine
+	config  *config.Config
+	db     *pgxpool.Pool
+}
+
+func New() (*Application, error) {
+	app := &Application{}
+
+	if err := app.initializeConfig(); err != nil {
+		return nil, err
+	}
+
+	if err := app.initializeDatabase(); err != nil {
+		return nil, err
+	}
+
+	if err := app.initializeRouter(); err != nil {
+		return nil, err
+	}
+
+	return app, nil
+}
+
+func (a *Application) Run() error {
+	return a.router.Run(":" + a.config.Server.Port)
+}
+
+func (a *Application) initializeConfig() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	a.config = cfg
+	return nil
+}
+
+func (a *Application) initializeDatabase() error {
+	db, err := database.New(a.config.Database.ConnectionString)
+	if err != nil {
+		return err
+	}
+
+	a.db = db
+	return nil
+}
+
+func (a *Application) initializeRouter() error {
+	router := NewRouter(a.db)
+
+	a.router = router
+	return nil
+}
+
+
+./internal/app/router.go
+------------------------
+package app
+
+import (
+	"go-react-router/internal/api/routes"
+
+	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// NewRouter creates and configures the application's HTTP router.
+func NewRouter(
+	db *pgxpool.Pool,
+) *gin.Engine {
+
+	router := gin.New()
+
+	router.Use(
+		gin.Logger(),
+		gin.Recovery(),
+	)
+
+	api := router.Group("/api/v1")
+
+	routes.RegisterUserRoutes(
+		api,
+		db,
+	)
+
+	return router
+}
+
+
+./internal/application/identity/command/register_user.go
+--------------------------------------------------------
+package command
+
+import (
+	"context"
+	"errors"
+	"net/mail"
+	"strings"
+
+	"go-react-router/internal/domain/identity"
+	"go-react-router/internal/domain/identity/valueobject"
+	"go-react-router/internal/domain/identity/aggregate"
+)
+
+// RegisterUserCommandHandler handles identity registration.
+type RegisterUserCommandHandler struct {
+	repository identity.Repository
+	hasher     valueobject.PasswordHasher
+}
+
+// NewRegisterUserCommandHandler creates a new RegisterUserCommandHandler.
+func NewRegisterUserCommandHandler(
+	repository identity.Repository,
+	hasher valueobject.PasswordHasher,
+) *RegisterUserCommandHandler {
+	return &RegisterUserCommandHandler{
+		repository: repository,
+		hasher:     hasher,
+	}
+}
+
+// Execute registers a new identity.
+func (h *RegisterUserCommandHandler) Execute(
+	ctx context.Context,
+	registration aggregate.Registration,
+) error {
+
+	if err := h.validate(&registration); err != nil {
+		return err
+	}
+
+	if err := h.ensureEmailIsAvailable(ctx, registration.Email); err != nil {
+		return err
+	}
+
+	passwordHash, err := h.hasher.Hash(registration.Password)
+	if err != nil {
+		return err
+	}
+
+	newUser := aggregate.User{
+		Email:        registration.Email,
+		PasswordHash: passwordHash,
+		FullName:     registration.FullName,
+	}
+
+	return h.repository.Create(ctx, newUser)
+}
+
+// validate normalizes and validates the registration.
+func (uc *RegisterUserCommandHandler) validate(
+	registration *aggregate.Registration,
+) error {
+
+	registration.Email = strings.TrimSpace(registration.Email)
+	registration.FullName = strings.TrimSpace(registration.FullName)
+
+	switch {
+	case registration.Email == "":
+		return identity.ErrEmailRequired
+
+	case registration.Password == "":
+		return identity.ErrPasswordRequired
+
+	case registration.FullName == "":
+		return identity.ErrFullNameRequired
+	}
+
+	if _, err := mail.ParseAddress(registration.Email); err != nil {
+		return identity.ErrInvalidEmail
+	}
+
+	return nil
+}
+
+// ensureEmailIsAvailable checks whether the email is already registered.
+func (h *RegisterUserCommandHandler) ensureEmailIsAvailable(
+	ctx context.Context,
+	email string,
+) error {
+
+	_, err := h.repository.FindByEmail(ctx, email)
+
+	switch {
+	case err == nil:
+		return identity.ErrEmailAlreadyExists
+
+	case errors.Is(err, identity.ErrUserNotFound):
+		return nil
+
+	default:
+		return err
+	}
+}
+
+
+./internal/config/config.go
+---------------------------
+package config
+
+import (
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/joho/godotenv"
+)
+
+type Config struct {
+	Server   ServerConfig
+	Database DatabaseConfig
+	JWT      JWTConfig
+}
+
+type ServerConfig struct {
+	Port string
+}
+
+type DatabaseConfig struct {
+	ConnectionString string
+}
+
+type JWTConfig struct {
+	Secret string
+	Expiry time.Duration
+}
+
+func Load() (*Config, error) {
+	_ = godotenv.Load()
+
+	port, err := getRequiredEnv("PORT")
+	if err != nil {
+		return nil, err
+	}
+
+	connectionString, err := getRequiredEnv("DATABASE_CONNECTION_STRING")
+
+	if err != nil {
+		return nil, err
+	}
+
+	jwtSecret, err := getRequiredEnv("JWT_SECRET")
+	if err != nil {
+		return nil, err
+	}
+
+	jwtExpiryString, err := getRequiredEnv("JWT_EXPIRY")
+	if err != nil {
+		return nil, err
+	}
+
+	jwtExpiry, err := time.ParseDuration(jwtExpiryString)
+	if err != nil {
+		return nil, fmt.Errorf("invalid JWT_EXPIRY: %w", err)
+	}
+
+	return &Config{
+		Server: ServerConfig{
+			Port: port,
+		},
+		Database: DatabaseConfig{
+			ConnectionString: connectionString,
+		},
+		JWT: JWTConfig{
+			Secret: jwtSecret,
+			Expiry: jwtExpiry,
+		},
+	}, nil
+}
+
+func getRequiredEnv(key string) (string, error) {
+	value := os.Getenv(key)
+
+	if value == "" {
+		return "", fmt.Errorf("missing required environment variable: %s", key)
+	}
+
+	return value, nil
+}
+
+
+./internal/domain/identity/aggregate/user.go
+--------------------------------------------
+package aggregate
+
+import "time"
+
+type User struct {
+	ID           string
+	Email        string
+	PasswordHash string
+	FullName     string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// Registration contains the information required to register a new user.
+type Registration struct {
+    Email    string `json:"email"`
+    Password string `json:"password"`
+    FullName string `json:"full_name"`
+}
+
+
+./internal/domain/identity/errors.go
+------------------------------------
+package identity
+
+import "errors"
+
+var (
+	// Repository errors.
+	ErrUserNotFound      = errors.New("user not found")
+	ErrEmailAlreadyExists = errors.New("email already exists")
+
+	// Validation errors.
+	ErrEmailRequired    = errors.New("email is required")
+	ErrInvalidEmail     = errors.New("invalid email address")
+	ErrPasswordRequired = errors.New("password is required")
+	ErrFullNameRequired = errors.New("full name is required")
+)
+
+
+./internal/domain/identity/repository.go
+----------------------------------------
+package identity
+
+import (
+	"context"
+	"go-react-router/internal/domain/identity/aggregate"
+)
+
+// Repository defines persistence operations for User.
+type Repository interface {
+	// Create persists a new user
+	Create(ctx context.Context, user aggregate.User) error
+
+	// FindByEmail returns:
+	//   (*User, nil)                -> success
+	//   (nil, ErrUserNotFound)      -> user doesn't exist
+	//   (nil, err)                  -> infrastructure error
+	FindByEmail(ctx context.Context, email string) (*aggregate.User, error)
+}
+
+
+./internal/domain/identity/valueobject/password_hash.go
+-------------------------------------------------------
+package valueobject
+
+// PasswordHasher hashes and verifies passwords.
+type PasswordHasher interface {
+	Hash(password string) (string, error)
+	Compare(password, hash string) error
+}
+
+
+./internal/infrastructure/database/connection.go
+------------------------------------------------
+package database
+
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+func New(connectionString string) (*pgxpool.Pool, error) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, connectionString)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, err
+	}
+
+	return pool, nil
+}
+
+
+./internal/infrastructure/database/user_repository.go
+-----------------------------------------------------
+package database
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"time"
+
+	"go-react-router/internal/domain/identity"
+	"go-react-router/internal/domain/identity/aggregate"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// UserRepository implements identity.Repository using PostgreSQL.
+type UserRepository struct {
+	db *pgxpool.Pool
+}
+
+// userRecord represents the persisted form of a User.
+type userRecord struct {
+	ID           string    `db:"id"`
+	Email        string    `db:"email"`
+	PasswordHash string    `db:"password_hash"`
+	FullName     string    `db:"full_name"`
+	CreatedAt    time.Time `db:"created_at"`
+	UpdatedAt    time.Time `db:"updated_at"`
+}
+
+// NewUserRepository creates a new UserRepository.
+func NewUserRepository(db *pgxpool.Pool) *UserRepository {
+	return &UserRepository{
+		db: db,
+	}
+}
+
+func toRecord(u aggregate.User) userRecord {
+	return userRecord{
+		ID:           u.ID,
+		Email:        u.Email,
+		PasswordHash: u.PasswordHash,
+		FullName:     u.FullName,
+		CreatedAt:    u.CreatedAt,
+		UpdatedAt:    u.UpdatedAt,
+	}
+}
+
+func toDomain(r userRecord) aggregate.User {
+	return aggregate.User{
+		ID:           r.ID,
+		Email:        r.Email,
+		PasswordHash: r.PasswordHash,
+		FullName:     r.FullName,
+		CreatedAt:    r.CreatedAt,
+		UpdatedAt:    r.UpdatedAt,
+	}
+}
+
+// Create persists a new identity.
+func (r *UserRepository) Create(
+	ctx context.Context,
+	u aggregate.User,
+) error {
+
+	record := toRecord(u)
+
+	err := r.db.QueryRow(
+		ctx,
+		`
+		INSERT INTO users (
+			email,
+			password_hash,
+			full_name
+		)
+		VALUES ($1, $2, $3)
+		RETURNING
+			id,
+			email,
+			password_hash,
+			full_name,
+			created_at,
+			updated_at
+		`,
+		record.Email,
+		record.PasswordHash,
+		record.FullName,
+	).Scan(
+		&record.ID,
+		&record.Email,
+		&record.PasswordHash,
+		&record.FullName,
+		&record.CreatedAt,
+		&record.UpdatedAt,
+	)
+
+	if err != nil {
+		var pgErr *pgconn.PgError
+
+		if errors.As(err, &pgErr) &&
+			pgErr.Code == "23505" &&
+			strings.Contains(pgErr.ConstraintName, "email") {
+
+			return identity.ErrEmailAlreadyExists
+		}
+
+		return err
+	}
+
+	return nil
+}
+
+// FindByEmail returns a identity by email.
+func (r *UserRepository) FindByEmail(
+	ctx context.Context,
+	email string,
+) (*aggregate.User, error) {
+
+	var record userRecord
+
+	err := r.db.QueryRow(
+		ctx,
+		`
+		SELECT
+			id,
+			email,
+			password_hash,
+			full_name,
+			created_at,
+			updated_at
+		FROM users
+		WHERE email = $1
+		`,
+		email,
+	).Scan(
+		&record.ID,
+		&record.Email,
+		&record.PasswordHash,
+		&record.FullName,
+		&record.CreatedAt,
+		&record.UpdatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, identity.ErrUserNotFound
+		}
+
+		return nil, err
+	}
+
+	domainUser := toDomain(record)
+
+	return &domainUser, nil
+}
+
+
+./internal/infrastructure/security/bycrypt_password_hasher.go
+-------------------------------------------------------------
+package security
+
+import (
+	"golang.org/x/crypto/bcrypt"
+)
+
+// BcryptPasswordHasher implements user.PasswordHasher using bcrypt.
+type BcryptPasswordHasher struct{}
+
+// NewBcryptPasswordHasher creates a new bcrypt password hasher.
+func NewBcryptPasswordHasher() *BcryptPasswordHasher {
+	return &BcryptPasswordHasher{}
+}
+
+// Hash hashes a plain-text password.
+func (h *BcryptPasswordHasher) Hash(password string) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword(
+		[]byte(password),
+		bcrypt.DefaultCost,
+	)
+	if err != nil {
+		return "", err
+	}
+
+	return string(hash), nil
+}
+
+// Compare compares a plain-text password against a bcrypt hash.
+func (h *BcryptPasswordHasher) Compare(
+	password string,
+	hash string,
+) error {
+	return bcrypt.CompareHashAndPassword(
+		[]byte(hash),
+		[]byte(password),
+	)
+}
+
+

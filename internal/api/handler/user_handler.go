@@ -5,31 +5,32 @@ import (
 	"net/http"
 
 	"go-react-router/internal/api/response"
-	"go-react-router/internal/domain/user"
-	"go-react-router/internal/domain/user/usecase/commands"
+	"go-react-router/internal/application/identity/command"
+	"go-react-router/internal/domain/identity"
+	"go-react-router/internal/domain/identity/aggregate"
 
 	"github.com/gin-gonic/gin"
 )
 
-// UserHandler handles user-related HTTP requests.
+// UserHandler handles identity-related HTTP requests.
 type UserHandler struct {
-	registerUser *commands.RegisterUserUseCase
+	registerUser *command.RegisterUserCommandHandler
 }
 
 // NewUserHandler creates a new UserHandler.
 func NewUserHandler(
-	registerUser *commands.RegisterUserUseCase,
+	registerUser *command.RegisterUserCommandHandler,
 ) *UserHandler {
 	return &UserHandler{
 		registerUser: registerUser,
 	}
 }
 
-// Register handles user registration.
+// Register handles identity registration.
 func (h *UserHandler) Register(
 	c *gin.Context,
 ) {
-	var registration user.Registration
+	var registration aggregate.Registration
 
 	if err := c.ShouldBindJSON(&registration); err != nil {
 		response.JSON(
@@ -51,7 +52,7 @@ func (h *UserHandler) Register(
 
 		switch {
 
-		case errors.Is(err, user.ErrEmailAlreadyExists):
+		case errors.Is(err, identity.ErrEmailAlreadyExists):
 			response.JSON(
 				c,
 				http.StatusConflict,
@@ -60,10 +61,10 @@ func (h *UserHandler) Register(
 				nil,
 			)
 
-		case errors.Is(err, user.ErrEmailRequired),
-			errors.Is(err, user.ErrInvalidEmail),
-			errors.Is(err, user.ErrPasswordRequired),
-			errors.Is(err, user.ErrFullNameRequired):
+		case errors.Is(err, identity.ErrEmailRequired),
+			errors.Is(err, identity.ErrInvalidEmail),
+			errors.Is(err, identity.ErrPasswordRequired),
+			errors.Is(err, identity.ErrFullNameRequired):
 
 			response.JSON(
 				c,

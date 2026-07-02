@@ -6,14 +6,15 @@ import (
 	"strings"
 	"time"
 
-	"go-react-router/internal/domain/user"
+	"go-react-router/internal/domain/identity"
+	"go-react-router/internal/domain/identity/aggregate"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// UserRepository implements user.Repository using PostgreSQL.
+// UserRepository implements identity.Repository using PostgreSQL.
 type UserRepository struct {
 	db *pgxpool.Pool
 }
@@ -35,7 +36,7 @@ func NewUserRepository(db *pgxpool.Pool) *UserRepository {
 	}
 }
 
-func toRecord(u user.User) userRecord {
+func toRecord(u aggregate.User) userRecord {
 	return userRecord{
 		ID:           u.ID,
 		Email:        u.Email,
@@ -46,8 +47,8 @@ func toRecord(u user.User) userRecord {
 	}
 }
 
-func toDomain(r userRecord) user.User {
-	return user.User{
+func toDomain(r userRecord) aggregate.User {
+	return aggregate.User{
 		ID:           r.ID,
 		Email:        r.Email,
 		PasswordHash: r.PasswordHash,
@@ -57,10 +58,10 @@ func toDomain(r userRecord) user.User {
 	}
 }
 
-// Create persists a new user.
+// Create persists a new identity.
 func (r *UserRepository) Create(
 	ctx context.Context,
-	u user.User,
+	u aggregate.User,
 ) error {
 
 	record := toRecord(u)
@@ -101,7 +102,7 @@ func (r *UserRepository) Create(
 			pgErr.Code == "23505" &&
 			strings.Contains(pgErr.ConstraintName, "email") {
 
-			return user.ErrEmailAlreadyExists
+			return identity.ErrEmailAlreadyExists
 		}
 
 		return err
@@ -110,11 +111,11 @@ func (r *UserRepository) Create(
 	return nil
 }
 
-// FindByEmail returns a user by email.
+// FindByEmail returns a identity by email.
 func (r *UserRepository) FindByEmail(
 	ctx context.Context,
 	email string,
-) (*user.User, error) {
+) (*aggregate.User, error) {
 
 	var record userRecord
 
@@ -143,7 +144,7 @@ func (r *UserRepository) FindByEmail(
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, user.ErrUserNotFound
+			return nil, identity.ErrUserNotFound
 		}
 
 		return nil, err

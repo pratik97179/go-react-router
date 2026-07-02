@@ -2,9 +2,9 @@ package routes
 
 import (
 	"go-react-router/internal/api/handler"
-	"go-react-router/internal/domain/user/usecase/commands"
-	"go-react-router/internal/platform/database"
-	"go-react-router/internal/platform/security"
+	"go-react-router/internal/application/identity/command"
+	"go-react-router/internal/infrastructure/database"
+	"go-react-router/internal/infrastructure/security"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -19,13 +19,13 @@ func RegisterUserRoutes(
 
 	passwordHasher := security.NewBcryptPasswordHasher()
 
-	registerUserUseCase := commands.NewRegisterUserUseCase(
+	registerUserCommandHandler := command.NewRegisterUserCommandHandler(
 		userRepository,
 		passwordHasher,
 	)
 
 	userHandler := handler.NewUserHandler(
-		registerUserUseCase,
+		registerUserCommandHandler,
 	)
 
 	users := router.Group("/users")

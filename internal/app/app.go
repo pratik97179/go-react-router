@@ -2,7 +2,7 @@ package app
 
 import (
 	"go-react-router/internal/config"
-	"go-react-router/internal/platform/database"
+	"go-react-router/internal/infrastructure/database"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
